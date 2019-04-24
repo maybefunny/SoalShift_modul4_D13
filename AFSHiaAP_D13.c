@@ -1,18 +1,20 @@
 #define FUSE_USE_VERSION 28
+#define HAVE_SETXATTR 1
 #include <fuse.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
+// #include <fcntl.h>
 #include <dirent.h>
 #include <errno.h>
 #include <ctype.h>
 #include <pthread.h>
 #include <sys/time.h>
-#include <sys/statfs.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/types.h>
 #include <pwd.h>
 #include <grp.h>
 
@@ -31,10 +33,13 @@ bool ext_match(const char *name, const char *ext);
 int check_file(char *path);
 bool isSplit(const char *name);
 int getFileName(char myFile[]);
+int copy_file(const char *target, const char *source, const size_t chunk);
 int remove_directory(const char *path);
 void encrypt(char message[]);
 void decrypt(char message[]);
 void* myJoin(void *arg);
+void print_unescaped(char* ptr);
+bool filename_match(const char *name, const char *ext);
 
 static int xmp_getattr(const char *path, struct stat *stbuf);
 static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,off_t offset, struct fuse_file_info *fi);
@@ -43,6 +48,12 @@ static int xmp_mkdir(const char *path, mode_t mode);
 static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi);
 static int xmp_release(const char *path, struct fuse_file_info *fi);
 static int xmp_chmod(const char *path, mode_t mode);
+static int xmp_write(const char *path, const char *buf, size_t size,off_t offset, struct fuse_file_info *fi);
+static int xmp_open(const char *path, struct fuse_file_info *fi);
+static int xmp_chown(const char *path, uid_t uid, gid_t gid);
+static int xmp_truncate(const char *path, off_t size);
+static int xmp_utimens(const char *path, const struct timespec ts[2]);
+static int xmp_unlink(const char *path);
 
 void xmp_init(struct fuse_conn_info *conn, struct fuse_config *cfg){
     size_t q;
@@ -91,7 +102,6 @@ void xmp_destroy(void *private_data){
 
 #ifdef HAVE_SETXATTR
 static int xmp_setxattr(const char *path, const char *name, const char *value,size_t size, int flags){
-    printf("DICOBA GAN!!!! %s-- %s\n", path, name);
 	int res = lsetxattr(path, name, value, size, flags);
 	if (res == -1)
 		return -errno;
@@ -128,6 +138,12 @@ static struct fuse_operations xmp_oper = {
     .create     = xmp_create,
     .release    = xmp_release,
     .chmod      = xmp_chmod,
+    .write      = xmp_write,
+    .open       = xmp_open,
+	.chown		= xmp_chown,
+	.truncate	= xmp_truncate,
+	.utimens	= xmp_utimens,
+    .unlink     = xmp_unlink,
     .init       = xmp_init,
     .destroy    = xmp_destroy,
 #ifdef HAVE_SETXATTR
@@ -354,6 +370,228 @@ static int xmp_chmod(const char *path, mode_t mode){
 	return 0;
 }
 
+static int xmp_write(const char *path, const char *buf, size_t size,off_t offset, struct fuse_file_info *fi){
+	int fd;
+	int res;
+
+    char fname[1000], fpath[1000], fromDir[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+    strcpy(fromDir, fpath);
+
+    fd = open(fpath, O_WRONLY);
+	if (fd == -1)
+		return -errno;
+
+	res = pwrite(fd, buf, size, offset);
+	if (res == -1)
+		res = -errno;
+
+	close(fd);
+
+    int i=strlen(fpath);
+    while(fpath[--i]!='/');
+    strcpy(fname, fpath+i);
+    fpath[i]=0;
+    strcat(fpath,"/XB.Jhu");
+    mkdir(fpath, 0750);
+
+    i=strlen(fname);
+    while(i>0 && fname[--i]!='`');
+    char myext[100];
+    if(i>0){
+        strcpy(myext, fname+i);
+        fname[i]=0;
+    }else{
+        mymemset(myext);
+    }
+
+    char dateTime[30];
+    time_t timer = time(NULL);
+    strftime(dateTime, 30, "_%Y-%m-%d_%H:%M:%S", localtime(&timer));
+    encrypt(dateTime);
+
+    strcat(fpath, fname);
+    strcat(fpath,dateTime);
+    strcat(fpath,myext);
+    
+	(void) fi;
+
+    if(fpath[0]!='`'){
+        pid_t child_id;
+
+        child_id = fork();
+
+        if(child_id==0){
+            char *argv[4] = {"cp", fromDir, fpath, NULL};
+            execv("/bin/cp", argv);
+        }
+    }
+
+	return res;
+}
+
+static int xmp_open(const char *path, struct fuse_file_info *fi){
+	int res;
+
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	res = open(fpath, fi->flags);
+	if (res == -1)
+		return -errno;
+
+	close(res);
+	return 0;
+}
+
+static int xmp_chown(const char *path, uid_t uid, gid_t gid){
+	int res;
+
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	res = lchown(fpath, uid, gid);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_truncate(const char *path, off_t size){
+	int res;
+
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	res = truncate(fpath, size);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_utimens(const char *path, const struct timespec ts[2]){
+	int res;
+
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	struct timeval tv[2];
+
+	tv[0].tv_sec = ts[0].tv_sec;
+	tv[0].tv_usec = ts[0].tv_nsec / 1000;
+	tv[1].tv_sec = ts[1].tv_sec;
+	tv[1].tv_usec = ts[1].tv_nsec / 1000;
+
+	res = utimes(fpath, tv);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_unlink(const char *path){
+    char fname[1000], fpath[1000], curFile[1000], zipFile[1000], target[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+    strcpy(curFile, fpath);
+
+    int i=strlen(fpath);
+    while(fpath[--i]!='/');
+    strcpy(fname, fpath+i);
+    fpath[i]=0;
+    strcpy(zipFile, fpath);
+    strcat(zipFile,"/oO.k.EOX[)");
+    mkdir(zipFile, 0750);
+
+    i=strlen(fname);
+    while(i>0 && fname[--i]!='`');
+    char myext[100];
+    if(i>0){
+        strcpy(myext, fname+i);
+        fname[i]=0;
+    }else{
+        mymemset(myext);
+    }
+
+    char dateTime[30];
+    time_t timer = time(NULL);
+    strftime(dateTime, 30, "_%Y-%m-%d_%H:%M:%S", localtime(&timer));
+    encrypt(dateTime);
+
+    strcat(zipFile, fname);
+    strcat(zipFile, "sxOEOHOx");
+    strcat(zipFile, dateTime);
+    strcat(zipFile, myext);
+    strcat(fpath, "/XB.Jhu");
+
+    pid_t pid = fork();
+
+    if (pid == -1) return -1;
+    else if (pid > 0){
+        int status;
+        waitpid(pid, &status, 0);
+    }else {
+        char *argv[] = {"zip", "-jm", zipFile, curFile , NULL};
+        execv("/usr/bin/zip", argv);
+        _exit(EXIT_FAILURE);   // exec never returns
+    }
+
+    DIR *dp;
+	struct dirent *ep;
+
+    dp = opendir(fpath);
+    chdir(fpath);
+    if(dp == NULL) return 0;
+    while(ep = readdir(dp)){
+        mymemset(target);
+        strcpy(target, fname+1);
+        if(filename_match(ep->d_name, target))
+            if(ext_match(ep->d_name, myext)){
+                pid_t pid = fork();
+
+                if (pid == -1) return -1;
+                else if (pid > 0){
+                    int status;
+                    waitpid(pid, &status, 0);
+                }else {
+                    mymemset(target);
+                    strcpy(target,fpath);
+                    strcat(target, "/");
+                    strcat(target, ep->d_name);
+                    char *argv[] = {"zip", "-jm", zipFile, target, NULL};
+                    execv("/usr/bin/zip", argv);
+                    _exit(EXIT_FAILURE);   // exec never returns
+                }
+            }
+    }
+
+    strcpy(target, zipFile);
+    strcat(target, "`S[u");
+    strcat(zipFile, ".zip");
+    copy_file(target, zipFile, 0);
+    remove(zipFile);
+    
+	return 0;
+}
+
 char* formatdate(char* str, time_t val){
         strftime(str, 36, "%d.%m.%Y %H:%M:%S", localtime(&val));
         return str;
@@ -575,4 +813,29 @@ void* myJoin(void *arg){
         sprintf(source,"/home/mungkin/shift4/%s%s", fname, mynum);
         if(copy_file(target,source, 0)) break;
     }
+}
+
+void print_unescaped(char* ptr){
+    if (!ptr) return;
+    char nyoh[1000];
+    int i=0;
+    while(ptr[i]!=0){
+        if(ptr[i]==';' ||  ptr[i]==')' ||  ptr[i]=='"' ||  ptr[i]=='\\' ||  ptr[i]=='`'){
+            mymemset(nyoh);
+            strcpy(nyoh, ptr);
+            ptr[i]='\\';
+            ptr[i+1]=0;
+            strcat(ptr, nyoh+i);
+            i++;
+        }
+        i++;
+    }
+}
+
+bool filename_match(const char *name, const char *filename){
+	size_t nl = strlen(name), el = strlen(filename);
+    char meh[1000];
+    strcpy(meh,name);
+    meh[el]=0;
+	return nl >= el && !strcmp(meh, filename);
 }
