@@ -77,7 +77,7 @@ ubah fungsi readdir sesuai permintaan soal.
 Pada folder YOUTUBER, setiap membuat folder permission foldernya akan otomatis menjadi 750. Juga ketika membuat file permissionnya akan otomatis menjadi 640 dan ekstensi filenya akan bertambah “.iz1”. File berekstensi “.iz1” tidak bisa diubah permissionnya dan memunculkan error bertuliskan “File ekstensi iz1 tidak boleh diubah permissionnya.”
 
 ### Jawab :
-atur fungsi chown, mkdir, dan create sesuai permintaan soal.
+atur fungsi chmod, mkdir, dan create sesuai permintaan soal.
 
 ### Langkah :
 - create & mkdir :

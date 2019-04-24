@@ -329,7 +329,6 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi){
     strncat(strSEMENTARA,(fpath+i),8*sizeof(char));
 
     if(!strcmp(strSEMENTARA, strYOUTUBER)){
-        strcat(fpath,"`[S%");
         res = creat(fpath, 0640);
     }else{
         res = creat(fpath, mode);
@@ -339,6 +338,14 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi){
 	return -errno;
 
     close(res);
+
+    if(!strcmp(strSEMENTARA, strYOUTUBER)){
+        strcpy(fname, fpath);
+        strcat(fname,"`[S%");
+        copy_file(fname, fpath, 0);
+        chmod(fname, 0640);
+        remove(fpath);
+    }
 
     return 0;
 }
@@ -358,12 +365,36 @@ static int xmp_chmod(const char *path, mode_t mode){
     mymemset(fpath);
     sprintf(fpath, "%s%s",dirpath,fname);
 
-    if(ext_match(fpath,"`[S%")){
-        system("zenity --warning --text='File ekstensi iz1 tidak boleh diubah permissionnya.'");
-        return 0;
+    int i=strlen(fpath);
+
+    while(fpath[--i]!='/');
+    while(fpath[--i]!='/');
+    i++;
+
+    char strYOUTUBER[]="@ZA>AXio";
+    char strSEMENTARA[]="@ZA>AXio";
+    
+    mymemset(strSEMENTARA);
+    strncat(strSEMENTARA,(fpath+i),8*sizeof(char));
+
+    if(!strcmp(strSEMENTARA, strYOUTUBER)){
+        if(ext_match(fpath,"`[S%")){
+            pid_t child_id;
+
+            child_id = fork();
+
+            if(child_id==0){
+                char *argv[4] = {"zenity", "--warning", "--text='File ekstensi iz1 tidak boleh diubah permissionnya.'", NULL};
+                execv("/usr/bin/zenity", argv);
+            }
+            return 0;
+        }else{
+            res = chmod(fpath, mode);
+        }
+    }else{
+        res = chmod(fpath, mode);
     }
 
-	res = chmod(fpath, mode);
 	if (res == -1)
 		return -errno;
 
