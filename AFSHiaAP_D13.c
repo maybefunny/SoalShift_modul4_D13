@@ -54,6 +54,14 @@ static int xmp_chown(const char *path, uid_t uid, gid_t gid);
 static int xmp_truncate(const char *path, off_t size);
 static int xmp_utimens(const char *path, const struct timespec ts[2]);
 static int xmp_unlink(const char *path);
+static int xmp_access(const char *path, int mask);
+static int xmp_readlink(const char *path, char *buf, size_t size);
+static int xmp_mknod(const char *path, mode_t mode, dev_t rdev);
+static int xmp_rmdir(const char *path);
+static int xmp_symlink(const char *from, const char *to);
+static int xmp_rename(const char *from, const char *to);
+static int xmp_link(const char *from, const char *to);
+static int xmp_statfs(const char *path, struct statvfs *stbuf);
 
 void xmp_init(struct fuse_conn_info *conn, struct fuse_config *cfg){
     size_t q;
@@ -152,6 +160,14 @@ static struct fuse_operations xmp_oper = {
 	.listxattr	= xmp_listxattr,
 	.removexattr	= xmp_removexattr,
 #endif
+    .access		= xmp_access,
+	.readlink	= xmp_readlink,
+	.mknod		= xmp_mknod,
+	.symlink	= xmp_symlink,
+	.rmdir		= xmp_rmdir,
+	.rename		= xmp_rename,
+	.link		= xmp_link,
+	.statfs		= xmp_statfs,
     /* ASKDHASHDJKASHDKJASDHASKJDHA
     ASDHJGASHJDGASHJD
     ASHJDGASHJD
@@ -175,6 +191,165 @@ static int xmp_getattr(const char *path, struct stat *stbuf){
 	sprintf(fpath,"%s%s",dirpath,fname);
 	res = lstat(fpath, stbuf);
 
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_access(const char *path, int mask)
+{
+	int res;
+    
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	res = access(fpath, mask);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_readlink(const char *path, char *buf, size_t size)
+{
+	int res;
+    
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	res = readlink(fpath, buf, size - 1);
+	if (res == -1)
+		return -errno;
+
+	buf[res] = '\0';
+	return 0;
+}
+
+static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
+{
+	int res;
+    
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	/* On Linux this could just be 'mknod(path, mode, rdev)' but this
+	   is more portable */
+	if (S_ISREG(mode)) {
+		res = open(fpath, O_CREAT | O_EXCL | O_WRONLY, mode);
+		if (res >= 0)
+			res = close(res);
+	} else if (S_ISFIFO(mode))
+		res = mkfifo(fpath, mode);
+	else
+		res = mknod(fpath, mode, rdev);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_rmdir(const char *path)
+{
+	int res;
+    
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	res = rmdir(fpath);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_symlink(const char *from, const char *to)
+{
+	int res;
+    
+    char fname[1000], fpath[1000], tpath[1000];
+    strcpy(fname,from);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+    strcpy(fname,to);
+    encrypt(fname);
+    mymemset(tpath);
+    sprintf(tpath, "%s%s",dirpath,fname);
+
+	res = symlink(fpath, tpath);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_rename(const char *from, const char *to)
+{
+	int res;
+    
+    char fname[1000], fpath[1000], tpath[1000];
+    strcpy(fname,from);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+    strcpy(fname,to);
+    encrypt(fname);
+    mymemset(tpath);
+    sprintf(tpath, "%s%s",dirpath,fname);
+
+	res = rename(fpath, tpath);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_link(const char *from, const char *to)
+{
+	int res;
+    
+    char fname[1000], fpath[1000], tpath[1000];
+    strcpy(fname,from);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+    strcpy(fname,to);
+    encrypt(fname);
+    mymemset(tpath);
+    sprintf(tpath, "%s%s",dirpath,fname);
+
+
+	res = link(fpath, tpath);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+
+static int xmp_statfs(const char *path, struct statvfs *stbuf)
+{
+	int res;
+    
+    char fname[1000], fpath[1000];
+    strcpy(fname,path);
+    encrypt(fname);
+    mymemset(fpath);
+    sprintf(fpath, "%s%s",dirpath,fname);
+
+	res = statvfs(fpath, stbuf);
 	if (res == -1)
 		return -errno;
 
