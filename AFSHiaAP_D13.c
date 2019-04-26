@@ -625,16 +625,16 @@ static int xmp_write(const char *path, const char *buf, size_t size,off_t offset
     
 	(void) fi;
 
-    if(fpath[0]!='`'){
-        pid_t child_id;
+    // if(fpath[0]!='`'){
+    pid_t child_id;
 
-        child_id = fork();
+    child_id = fork();
 
-        if(child_id==0){
-            char *argv[4] = {"cp", fromDir, fpath, NULL};
-            execv("/bin/cp", argv);
-        }
+    if(child_id==0){
+        char *argv[4] = {"cp", fromDir, fpath, NULL};
+        execv("/bin/cp", argv);
     }
+    // }
 
 	return res;
 }
